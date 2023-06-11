@@ -22,7 +22,7 @@ token = None
 if not os.path.exists(tokens_path):
     token_needed = input('Do you need to access private repositories? (y/n): ')
     if token_needed == 'y':
-        token = input('Enter your GitHub token:')
+        token = input('Enter your GitHub token: ')
         with open(tokens_path, 'w') as f:
             json.dump({"token": token}, f, ensure_ascii=False, indent=4)
 else:
