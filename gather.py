@@ -1,5 +1,6 @@
 import requests, os, json, argparse
 from pathlib import Path
+from datetime import datetime
 
 def get_args():
     parser = argparse.ArgumentParser(description='Gather commits and issues from GitHub repositories')
@@ -12,8 +13,19 @@ def get_args():
 def main():
     args = get_args()
 
-    # Year-Month-Day
-    split_date_l = ['2024-02-15', '2024-03-17']
+    ms_dates = [
+        {'year': 2024, 'month': 3, 'day': 19, 'hour': 22, 'minute': 0, 'second': 0},
+        {'year': 2024, 'month': 4, 'day': 30, 'hour': 22, 'minute': 0, 'second': 0}
+    ]
+    for i, date in enumerate(ms_dates):
+        year, month, day, hour, minute, second = date['year'], date['month'], date['day'], date['hour'], date['minute'], date['second']
+        ms_dates[i]['year'] = f'{year:04d}'
+        ms_dates[i]['month'] = f'{month:02d}'
+        ms_dates[i]['day'] = f'{day:02d}'
+        ms_dates[i]['hour'] = f'{hour:02d}'
+        ms_dates[i]['minute'] = f'{minute:02d}'
+        ms_dates[i]['second'] = f'{second:02d}'
+    ms_dates = [datetime.fromisoformat('%s-%s-%sT%s:%s:%s+00:00' % (date['year'], date['month'], date['day'], date['hour'], date['minute'], date['second'])) for date in ms_dates]
 
     repos_path = Path(args.repos)
     if not repos_path.exists():
@@ -49,9 +61,7 @@ def main():
 
     for tuple_t in repo_l:
         user_t, repo_t = tuple_t.split('/')
-        ms_d = {}
-        for i in range(1, len(split_date_l)):
-            ms_d[i] = { 'date': split_date_l[i-1], 'commits': {}, 'issues': {} }
+        ms_l = [{'date': ms_date.strftime('%Y-%m-%d %H:%M:%S'), 'commits': {}, 'issues': {}} for ms_date in ms_dates]
         repo_url = 'https://api.github.com/repos/%s/%s' % (user_t, repo_t)
         repo_req = requests.get(repo_url, headers=headers)
         repo_res = repo_req.json()
@@ -66,6 +76,7 @@ def main():
                 break
             for commit in commits:
                 date_t = commit['commit']['author']['date']
+                date_t = datetime.fromisoformat(date_t.replace('Z', '+00:00'))
                 if 'author' in commit.keys() and type(commit['author']) == dict and 'login' in commit['author'].keys():
                     author_t = commit['author']['login']
                 elif 'commit' in commit.keys() and type(commit['commit']) == dict and 'author' in commit['commit'].keys() and type(commit['commit']['author']) == dict and 'name' in commit['commit']['author'].keys():
@@ -73,13 +84,12 @@ def main():
                 else:
                     author_t = 'unknown'
                 message_t = commit['commit']['message']
-                for i in range(1, len(split_date_l)):
-                    ms_date = split_date_l[i]
+                for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
-                        if author_t not in ms_d[i]['commits'].keys():
-                            ms_d[i]['commits'][author_t] = { 'messages': list(), 'count': 0 }
-                        ms_d[i]['commits'][author_t]['messages'].append(message_t)
-                        ms_d[i]['commits'][author_t]['count'] += 1
+                        if author_t not in ms_l[i]['commits'].keys():
+                            ms_l[i]['commits'][author_t] = { 'messages': list(), 'count': 0 }
+                        ms_l[i]['commits'][author_t]['messages'].append(message_t)
+                        ms_l[i]['commits'][author_t]['count'] += 1
                         break
             page_n += 1
         page_n = 1
@@ -91,6 +101,7 @@ def main():
                 break
             for issue in issues:
                 date_t = issue['created_at']
+                date_t = datetime.fromisoformat(date_t.replace('Z', '+00:00'))
                 title_t = issue['title']
                 desc_t = issue['body']
                 label_cnt = len(issue['labels'])
@@ -103,18 +114,17 @@ def main():
                     comments_res = comments_req.json()
                     for comment in comments_res:
                         comments.append( { 'author': comment['user']['login'], 'body': comment['body'] } )
-                for i in range(1, len(split_date_l)):
-                    ms_date = split_date_l[i]
+                for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
-                        if author_t not in ms_d[i]['issues'].keys():
-                            ms_d[i]['issues'][author_t] = { 'list': [], 'count': 0 }
-                        ms_d[i]['issues'][author_t]['list'].append({ 'title': title_t, 'desc': desc_t, 'label_count': label_cnt, 'comments': comments, 'assignee_count': assignee_cnt })
-                        ms_d[i]['issues'][author_t]['count'] += 1
+                        if author_t not in ms_l[i]['issues'].keys():
+                            ms_l[i]['issues'][author_t] = { 'list': [], 'count': 0 }
+                        ms_l[i]['issues'][author_t]['list'].append({ 'title': title_t, 'desc': desc_t, 'label_count': label_cnt, 'comments': comments, 'assignee_count': assignee_cnt })
+                        ms_l[i]['issues'][author_t]['count'] += 1
                         break
             page_n += 1
         repo_path = data_path / ('%s-%s.json' % (user_t, repo_t))
         with repo_path.open('w') as f:
-            json.dump(ms_d, f, ensure_ascii=False, indent=4)
+            json.dump(ms_l, f, ensure_ascii=False, indent=4)
 
 if __name__ == '__main__':
     main()
