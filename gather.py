@@ -1,4 +1,4 @@
-import requests, os, json, argparse
+import requests, os, json, argparse, re
 from pathlib import Path
 from datetime import datetime
 
@@ -13,9 +13,12 @@ def get_args():
 def main():
     args = get_args()
 
+    coauthor_pattern = re.compile(r'Co-authored-by: (.*) <.*>')
+
     ms_dates = [
         {'year': 2024, 'month': 3, 'day': 19, 'hour': 22, 'minute': 0, 'second': 0},
-        {'year': 2024, 'month': 4, 'day': 30, 'hour': 22, 'minute': 0, 'second': 0}
+        {'year': 2024, 'month': 4, 'day': 30, 'hour': 22, 'minute': 0, 'second': 0},
+        {'year': 2024, 'month': 5, 'day': 17, 'hour': 22, 'minute': 0, 'second': 0}
     ]
     for i, date in enumerate(ms_dates):
         year, month, day, hour, minute, second = date['year'], date['month'], date['day'], date['hour'], date['minute'], date['second']
@@ -47,7 +50,7 @@ def main():
         if token_needed == 'y':
             token = input('Enter your GitHub token: ')
             with token_path.open('w') as f:
-                json.dump({"token": token}, f, ensure_ascii=False, indent=4)
+                json.dump({'token': token}, f, ensure_ascii=False, indent=4)
     else:
         with token_path.open() as f:
             content = json.load(f)
@@ -61,6 +64,7 @@ def main():
 
     for tuple_t in repo_l:
         user_t, repo_t = tuple_t.split('/')
+        base_url = f'https://github.com/{tuple_t}/commit/'
         ms_l = [{'date': ms_date.strftime('%Y-%m-%d %H:%M:%S'), 'commits': {}, 'issues': {}} for ms_date in ms_dates]
         repo_url = 'https://api.github.com/repos/%s/%s' % (user_t, repo_t)
         repo_req = requests.get(repo_url, headers=headers)
@@ -68,6 +72,7 @@ def main():
         if 'message' in repo_res.keys() and repo_res['message'] == 'Not Found':
             continue
         page_n = 1
+        repo_path = data_path / ('%s-%s.json' % (user_t, repo_t))
         while 1:
             commit_url = 'https://api.github.com/repos/%s/%s/commits?page=%s' % (user_t, repo_t, page_n)
             com_req = requests.get(commit_url, headers=headers)
@@ -84,13 +89,18 @@ def main():
                 else:
                     author_t = 'unknown'
                 message_t = commit['commit']['message']
+                coauthors = coauthor_pattern.findall(message_t)
+                hash_t = commit['sha']
                 for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
-                        if author_t not in ms_l[i]['commits'].keys():
-                            ms_l[i]['commits'][author_t] = { 'messages': list(), 'count': 0 }
-                        ms_l[i]['commits'][author_t]['messages'].append(message_t)
-                        ms_l[i]['commits'][author_t]['count'] += 1
+                        for author_t in coauthors + [author_t]:
+                            if author_t not in ms_l[i]['commits'].keys():
+                                ms_l[i]['commits'][author_t] = { 'list': [], 'count': 0 }
+                            ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'link': base_url + hash_t })
+                            ms_l[i]['commits'][author_t]['count'] += 1
                         break
+            with repo_path.open('w') as f:
+                json.dump(ms_l, f, ensure_ascii=False, indent=4)
             page_n += 1
         page_n = 1
         while 1:
@@ -121,8 +131,9 @@ def main():
                         ms_l[i]['issues'][author_t]['list'].append({ 'title': title_t, 'desc': desc_t, 'label_count': label_cnt, 'comments': comments, 'assignee_count': assignee_cnt })
                         ms_l[i]['issues'][author_t]['count'] += 1
                         break
+            with repo_path.open('w') as f:
+                json.dump(ms_l, f, ensure_ascii=False, indent=4)
             page_n += 1
-        repo_path = data_path / ('%s-%s.json' % (user_t, repo_t))
         with repo_path.open('w') as f:
             json.dump(ms_l, f, ensure_ascii=False, indent=4)
 
