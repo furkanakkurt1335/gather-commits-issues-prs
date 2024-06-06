@@ -65,7 +65,7 @@ def main():
     for tuple_t in repo_l:
         user_t, repo_t = tuple_t.split('/')
         base_url = f'https://github.com/{tuple_t}/commit/'
-        ms_l = [{'date': ms_date.strftime('%Y-%m-%d %H:%M:%S'), 'commits': {}, 'issues': {}} for ms_date in ms_dates]
+        ms_l = [{'date': ms_date.strftime('%Y-%m-%d %H:%M:%S'), 'commits': {}, 'issues': {}, 'prs': {}} for ms_date in ms_dates]
         repo_url = 'https://api.github.com/repos/%s/%s' % (user_t, repo_t)
         repo_req = requests.get(repo_url, headers=headers)
         repo_res = repo_req.json()
@@ -110,6 +110,8 @@ def main():
             if len(issues) == 0:
                 break
             for issue in issues:
+                is_pr = 'pull_request' in issue.keys()
+                key_t = 'prs' if is_pr else 'issues'
                 date_t = issue['created_at']
                 date_t = datetime.fromisoformat(date_t.replace('Z', '+00:00'))
                 title_t = issue['title']
@@ -126,10 +128,11 @@ def main():
                         comments.append( { 'author': comment['user']['login'], 'body': comment['body'] } )
                 for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
-                        if author_t not in ms_l[i]['issues'].keys():
-                            ms_l[i]['issues'][author_t] = { 'list': [], 'count': 0 }
-                        ms_l[i]['issues'][author_t]['list'].append({ 'title': title_t, 'desc': desc_t, 'label_count': label_cnt, 'comments': comments, 'assignee_count': assignee_cnt })
-                        ms_l[i]['issues'][author_t]['count'] += 1
+                        if author_t not in ms_l[i][key_t].keys():
+                            ms_l[i][key_t][author_t] = { 'list': [], 'count': 0 }
+                        d = { 'title': title_t, 'desc': desc_t, 'label_count': label_cnt, 'comments': comments, 'assignee_count': assignee_cnt, 'link': issue['html_url'], 'state': issue['state']}
+                        ms_l[i][key_t][author_t]['list'].append(d)
+                        ms_l[i][key_t][author_t]['count'] += 1
                         break
             with repo_path.open('w') as f:
                 json.dump(ms_l, f, ensure_ascii=False, indent=4)
