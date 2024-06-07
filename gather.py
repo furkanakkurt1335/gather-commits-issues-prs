@@ -8,7 +8,7 @@ def get_args():
     parser.add_argument('-t', '--token', help='GitHub token path', type=str, default='token.json')
     parser.add_argument('-r', '--repos', help='Path to the JSON file with the repositories', type=str, default='repos.json')
     parser.add_argument('-d', '--date', help='Path to the JSON file with the dates', type=str, default='dates.json')
-    parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues')
+    parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues-prs')
     return parser.parse_args()
 
 def main():
@@ -66,6 +66,7 @@ def main():
 
     diff_pattern = re.compile(r'Showing (\d+) changed files? with (\d+) additions? and (\d+) deletions?\.')
     for tuple_t in repo_l:
+        print('Gathering data for %s' % tuple_t)
         user_t, repo_t = tuple_t.split('/')
         base_url = f'https://github.com/{tuple_t}/commit/'
         diff_url = base_url + '{hash}?diff=unified&w=1'
@@ -110,7 +111,7 @@ def main():
                         for author_t in coauthors + [author_t]:
                             if author_t not in ms_l[i]['commits'].keys():
                                 ms_l[i]['commits'][author_t] = { 'count': 0, 'list': [] }
-                            ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'date': date_str, 'link': base_url + hash_t, 'diff': diff})
+                            ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'date': date_str, 'link': base_url + hash_t + '?diff=unified&w=1', 'diff': diff})
                             ms_l[i]['commits'][author_t]['count'] += 1
                         break
             with repo_path.open('w') as f:
@@ -155,6 +156,12 @@ def main():
                 json.dump(ms_l, f, ensure_ascii=False, indent=4)
             page_n += 1
         print('Finished gathering issues and PRs for %s' % tuple_t)
+        # sort by date
+        for i, ms_date in enumerate(ms_dates):
+            for key_t in ['commits', 'issues', 'prs']:
+                if key_t in ms_l[i].keys():
+                    for author_t in ms_l[i][key_t].keys():
+                        ms_l[i][key_t][author_t]['list'] = sorted(ms_l[i][key_t][author_t]['list'], key=lambda x: x['date'])
         with repo_path.open('w') as f:
             json.dump(ms_l, f, ensure_ascii=False, indent=4)
         print('Finished gathering all data for %s' % tuple_t)
