@@ -1,7 +1,6 @@
 import requests, os, json, argparse, re
 from pathlib import Path
 from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
 
 def get_args():
     parser = argparse.ArgumentParser(description='Gather commits and issues from GitHub repositories')
@@ -10,6 +9,13 @@ def get_args():
     parser.add_argument('-d', '--date', help='Path to the JSON file with the dates', type=str, default='dates.json')
     parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues-prs')
     return parser.parse_args()
+
+def get_diff(url, headers):
+    commit_req = requests.get(url, headers=headers)
+    commit_res = commit_req.json()
+    filenames = {file['filename'] for file in commit_res['files']}
+    total = commit_res['stats']['total']
+    return { 'filenames': filenames, 'total': total }
 
 def main():
     args = get_args()
@@ -64,12 +70,9 @@ def main():
     if token:
         headers['Authorization'] = 'Bearer {}'.format(token)
 
-    diff_pattern = re.compile(r'Showing (\d+) changed files? with (\d+) additions? and (\d+) deletions?\.')
     for tuple_t in repo_l:
         print('Gathering data for %s' % tuple_t)
         user_t, repo_t = tuple_t.split('/')
-        base_url = f'https://github.com/{tuple_t}/commit/'
-        diff_url = base_url + '{hash}?diff=unified&w=1'
         ms_l = [{'date': ms_date.strftime('%Y-%m-%d %H:%M:%S'), 'commits': {}, 'issues': {}, 'prs': {}} for ms_date in ms_dates]
         repo_url = 'https://api.github.com/repos/%s/%s' % (user_t, repo_t)
         repo_req = requests.get(repo_url, headers=headers)
@@ -78,13 +81,15 @@ def main():
             continue
         page_n = 1
         repo_path = data_path / ('%s-%s.json' % (user_t, repo_t))
+        prev_diffs = {}
         while 1:
-            commit_url = 'https://api.github.com/repos/%s/%s/commits?page=%s' % (user_t, repo_t, page_n)
-            com_req = requests.get(commit_url, headers=headers)
-            commits = com_req.json()
+            commits_url = 'https://api.github.com/repos/%s/%s/commits?page=%s' % (user_t, repo_t, page_n)
+            commits_req = requests.get(commits_url, headers=headers)
+            commits = commits_req.json()
             if len(commits) == 0:
                 break
             for commit in commits:
+                commit_url = commit['url']
                 date_t = commit['commit']['author']['date']
                 date_t = datetime.fromisoformat(date_t.replace('Z', '+00:00'))
                 date_str = (date_t + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')
@@ -96,22 +101,17 @@ def main():
                     author_t = 'unknown'
                 message_t = commit['commit']['message']
                 coauthors = coauthor_pattern.findall(message_t)
-                hash_t = commit['sha']
-                diff_url_t = diff_url.format(hash=hash_t)
-                diff_req = requests.get(diff_url_t, headers=headers)
-                soup = BeautifulSoup(diff_req.text, 'html.parser')
-                text = re.sub(r'\s+', ' ', soup.text) # rm whitespaces
-                diff = diff_pattern.search(text)
-                if diff:
-                    diff = { 'files': diff.group(1), 'additions': diff.group(2), 'deletions': diff.group(3) }
-                else:
-                    diff = 'unknown'
+                html_url = commit['html_url']
+                diff = get_diff(commit_url, headers)
+                sha = commit['sha']
+                prev_diffs[sha] = diff
+                diff = {'files': len(diff['filenames']), 'total': diff['total']}
                 for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
                         for author_t in coauthors + [author_t]:
                             if author_t not in ms_l[i]['commits'].keys():
                                 ms_l[i]['commits'][author_t] = { 'count': 0, 'list': [] }
-                            ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'date': date_str, 'link': base_url + hash_t + '?diff=unified&w=1', 'diff': diff})
+                            ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'date': date_str, 'link': html_url, 'diff': diff})
                             ms_l[i]['commits'][author_t]['count'] += 1
                         break
             with repo_path.open('w') as f:
@@ -144,11 +144,32 @@ def main():
                     comments_res = comments_req.json()
                     for comment in comments_res:
                         comments.append( { 'author': comment['user']['login'], 'body': comment['body'] } )
+                html_url = issue['html_url']
+                # if is_pr:
+                #     commits_url = issue['pull_request']['url'] + '/commits'
+                #     commits_req = requests.get(commits_url, headers=headers)
+                #     commits_res = commits_req.json()
+                #     urls = {commit['sha']: commit['url'] for commit in commits_res}
+                #     diffs = []
+                #     for sha, url in urls.items():
+                #         if sha not in prev_diffs.keys():
+                #             diff = get_diff(url, headers)
+                #             prev_diffs[sha] = diff
+                #         else:
+                #             diff = prev_diffs[sha]
+                #         diffs.append(diff)
+                #     diff_d = {'files': set(), 'total': sum([diff['total'] for diff in diffs])}
+                #     for diff in diffs:
+                #         for filename in diff['filenames']:
+                #             diff_d['files'].add(filename)
+                #     diff_d['files'] = len(diff_d['files'])
                 for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
                         if author_t not in ms_l[i][key_t].keys():
                             ms_l[i][key_t][author_t] = { 'count': 0, 'list': [] }
-                        d = { 'title': title_t, 'desc': desc_t, 'date': date_str, 'labels': label_l, 'assignees': assignee_l, 'link': issue['html_url'], 'state': issue['state'], 'comments': comments }
+                        d = { 'title': title_t, 'desc': desc_t, 'date': date_str, 'labels': label_l, 'assignees': assignee_l, 'link': html_url, 'state': issue['state'], 'comments': comments }
+                        # if is_pr:
+                        #     d['diff'] = diff_d
                         ms_l[i][key_t][author_t]['list'].append(d)
                         ms_l[i][key_t][author_t]['count'] += 1
                         break
@@ -162,6 +183,11 @@ def main():
                 if key_t in ms_l[i].keys():
                     for author_t in ms_l[i][key_t].keys():
                         ms_l[i][key_t][author_t]['list'] = sorted(ms_l[i][key_t][author_t]['list'], key=lambda x: x['date'])
+        # sort keys
+        for i, ms_date in enumerate(ms_dates):
+            for key_t in ['commits', 'issues', 'prs']:
+                if key_t in ms_l[i].keys():
+                    ms_l[i][key_t] = dict(sorted(ms_l[i][key_t].items(), key=lambda x: x[0]))
         with repo_path.open('w') as f:
             json.dump(ms_l, f, ensure_ascii=False, indent=4)
         print('Finished gathering all data for %s' % tuple_t)
