@@ -1,2 +1,12 @@
 # gather-commits-issues
-Gathering commits and issues of a repository
+
+Script for gathering commits, issues and PRs of a GitHub repository.
+
+## Usage
+
+```bash
+pip install --user pipenv
+pipenv install
+pipenv shell
+python gather.py
+```
