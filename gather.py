@@ -22,10 +22,18 @@ def main():
 
     coauthor_pattern = re.compile(r'Co-authored-by: (.*) <.*>')
 
+    not_before_date = {'year': 2024, 'month': 9, 'day': 23, 'hour': 0, 'minute': 0, 'second': 0}
+    not_before_d = {
+        'year': f'{not_before_date["year"]:04d}',
+        'month': f'{not_before_date["month"]:02d}',
+        'day': f'{not_before_date["day"]:02d}',
+        'hour': f'{not_before_date["hour"]:02d}',
+        'minute': f'{not_before_date["minute"]:02d}',
+        'second': f'{not_before_date["second"]:02d}'
+    }
+    not_before_date = datetime.fromisoformat('%s-%s-%sT%s:%s:%s+03:00' % (not_before_d['year'], not_before_d['month'], not_before_d['day'], not_before_d['hour'], not_before_d['minute'], not_before_d['second']))
     ms_dates = [
-        {'year': 2024, 'month': 3, 'day': 19, 'hour': 22, 'minute': 0, 'second': 0},
-        {'year': 2024, 'month': 4, 'day': 30, 'hour': 22, 'minute': 0, 'second': 0},
-        {'year': 2024, 'month': 5, 'day': 17, 'hour': 22, 'minute': 0, 'second': 0}
+        {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0}
     ]
     gmt_str = '+03:00'
     for i, date in enumerate(ms_dates):
@@ -54,7 +62,7 @@ def main():
     token_path = Path(args.token)
     token = None
     if not token_path.exists():
-        token_needed = input('Do you need to access private repositories? (y/n): ')
+        token_needed = input('Do you need to access private repositories? (y/N): ')
         if token_needed == 'y':
             token = input('Enter your GitHub token: ')
             with token_path.open('w') as f:
@@ -88,10 +96,17 @@ def main():
             commits = commits_req.json()
             if len(commits) == 0:
                 break
+            if 'message' in commits and 'API rate limit exceeded' in commits['message']:
+                print('API rate limit exceeded, adding a token to the `token.json` file might help.')
+                exit()
+            seen_before = False
             for commit in commits:
                 commit_url = commit['url']
                 date_t = commit['commit']['author']['date']
                 date_t = datetime.fromisoformat(date_t.replace('Z', '+00:00'))
+                if date_t < not_before_date: # This assumes the remaining commits are older than the not_before_date
+                    seen_before = True
+                    break
                 date_str = (date_t + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')
                 if 'author' in commit.keys() and type(commit['author']) == dict and 'login' in commit['author'].keys():
                     author_t = commit['author']['login']
@@ -114,6 +129,8 @@ def main():
                             ms_l[i]['commits'][author_t]['list'].append({ 'message': message_t, 'date': date_str, 'link': html_url, 'diff': diff})
                             ms_l[i]['commits'][author_t]['count'] += 1
                         break
+            if seen_before:
+                break
             with repo_path.open('w') as f:
                 json.dump(ms_l, f, ensure_ascii=False, indent=4)
             page_n += 1
@@ -125,10 +142,14 @@ def main():
             issues = iss_req.json()
             if len(issues) == 0:
                 break
+            seen_before = False
             for issue in issues:
                 is_pr = 'pull_request' in issue.keys()
                 key_t = 'prs' if is_pr else 'issues'
                 date_t = datetime.fromisoformat(issue['created_at'].replace('Z', '+00:00'))
+                if date_t < not_before_date: # This assumes the remaining issues are older than the not_before_date
+                    seen_before = True
+                    break
                 date_str = (date_t + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')
                 title_t = issue['title']
                 desc_t = issue['body']
@@ -145,34 +166,36 @@ def main():
                     for comment in comments_res:
                         comments.append( { 'author': comment['user']['login'], 'body': comment['body'] } )
                 html_url = issue['html_url']
-                # if is_pr:
-                #     commits_url = issue['pull_request']['url'] + '/commits'
-                #     commits_req = requests.get(commits_url, headers=headers)
-                #     commits_res = commits_req.json()
-                #     urls = {commit['sha']: commit['url'] for commit in commits_res}
-                #     diffs = []
-                #     for sha, url in urls.items():
-                #         if sha not in prev_diffs.keys():
-                #             diff = get_diff(url, headers)
-                #             prev_diffs[sha] = diff
-                #         else:
-                #             diff = prev_diffs[sha]
-                #         diffs.append(diff)
-                #     diff_d = {'files': set(), 'total': sum([diff['total'] for diff in diffs])}
-                #     for diff in diffs:
-                #         for filename in diff['filenames']:
-                #             diff_d['files'].add(filename)
-                #     diff_d['files'] = len(diff_d['files'])
+                if is_pr:
+                    commits_url = issue['pull_request']['url'] + '/commits'
+                    commits_req = requests.get(commits_url, headers=headers)
+                    commits_res = commits_req.json()
+                    urls = {commit['sha']: commit['url'] for commit in commits_res}
+                    diffs = []
+                    for sha, url in urls.items():
+                        if sha not in prev_diffs.keys():
+                            diff = get_diff(url, headers)
+                            prev_diffs[sha] = diff
+                        else:
+                            diff = prev_diffs[sha]
+                        diffs.append(diff)
+                    diff_d = {'files': set(), 'total': sum([diff['total'] for diff in diffs])} # This is not accurate as commits can override each other's changes. After 2 commits, there might even be no changes.
+                    for diff in diffs:
+                        for filename in diff['filenames']:
+                            diff_d['files'].add(filename)
+                    diff_d['files'] = len(diff_d['files'])
                 for i, ms_date in enumerate(ms_dates):
                     if date_t < ms_date:
                         if author_t not in ms_l[i][key_t].keys():
                             ms_l[i][key_t][author_t] = { 'count': 0, 'list': [] }
                         d = { 'title': title_t, 'desc': desc_t, 'date': date_str, 'labels': label_l, 'assignees': assignee_l, 'link': html_url, 'state': issue['state'], 'comments': comments }
-                        # if is_pr:
-                        #     d['diff'] = diff_d
+                        if is_pr:
+                            d['diff'] = diff_d
                         ms_l[i][key_t][author_t]['list'].append(d)
                         ms_l[i][key_t][author_t]['count'] += 1
                         break
+            if seen_before:
+                break
             with repo_path.open('w') as f:
                 json.dump(ms_l, f, ensure_ascii=False, indent=4)
             page_n += 1
