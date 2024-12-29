@@ -1,2 +1,4 @@
-commits-issues-prs/
+.DS_Store
 *.json
+commits-issues-prs/
+summaries/

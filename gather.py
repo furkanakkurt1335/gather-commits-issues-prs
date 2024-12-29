@@ -8,6 +8,7 @@ def get_args():
     parser.add_argument('-r', '--repos', help='Path to the JSON file with the repositories', type=str, default='repos.json')
     parser.add_argument('-d', '--date', help='Path to the JSON file with the dates', type=str, default='dates.json')
     parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues-prs')
+    parser.add_argument('-b', '--branch', help='Branch to gather data from', type=str)
     return parser.parse_args()
 
 def get_diff(url, headers):
@@ -22,7 +23,9 @@ def main():
 
     coauthor_pattern = re.compile(r'Co-authored-by: (.*) <.*>')
 
-    not_before_date = {'year': 2024, 'month': 9, 'day': 23, 'hour': 0, 'minute': 0, 'second': 0}
+    # not_before_date = {'year': 2024, 'month': 9, 'day': 23, 'hour': 0, 'minute': 0, 'second': 0}
+    # not_before_date = {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0}
+    not_before_date = {'year': 2024, 'month': 11, 'day': 30, 'hour': 0, 'minute': 0, 'second': 0}
     not_before_d = {
         'year': f'{not_before_date["year"]:04d}',
         'month': f'{not_before_date["month"]:02d}',
@@ -33,7 +36,9 @@ def main():
     }
     not_before_date = datetime.fromisoformat('%s-%s-%sT%s:%s:%s+03:00' % (not_before_d['year'], not_before_d['month'], not_before_d['day'], not_before_d['hour'], not_before_d['minute'], not_before_d['second']))
     ms_dates = [
-        {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0}
+        # {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0},
+        # {'year': 2024, 'month': 11, 'day': 30, 'hour': 0, 'minute': 0, 'second': 0},
+        {'year': 2024, 'month': 12, 'day': 21, 'hour': 0, 'minute': 0, 'second': 0}
     ]
     gmt_str = '+03:00'
     for i, date in enumerate(ms_dates):
@@ -91,14 +96,21 @@ def main():
         repo_path = data_path / ('%s-%s.json' % (user_t, repo_t))
         prev_diffs = {}
         while 1:
-            commits_url = 'https://api.github.com/repos/%s/%s/commits?page=%s' % (user_t, repo_t, page_n)
+            if args.branch:
+                commits_url = 'https://api.github.com/repos/%s/%s/commits?sha=%s&page=%s' % (user_t, repo_t, args.branch, page_n)
+            else:
+                commits_url = 'https://api.github.com/repos/%s/%s/commits?page=%s' % (user_t, repo_t, page_n)
             commits_req = requests.get(commits_url, headers=headers)
             commits = commits_req.json()
             if len(commits) == 0:
                 break
-            if 'message' in commits and 'API rate limit exceeded' in commits['message']:
-                print('API rate limit exceeded, adding a token to the `token.json` file might help.')
-                exit()
+            if 'message' in commits:
+                if 'API rate limit exceeded' in commits['message']:
+                    print('API rate limit exceeded, adding a token to the `token.json` file might help.')
+                    exit()
+                elif 'Bad credentials' in commits['message']:
+                    print('Bad credentials, please check your token in the `token.json` file.')
+                    exit()
             seen_before = False
             for commit in commits:
                 commit_url = commit['url']
