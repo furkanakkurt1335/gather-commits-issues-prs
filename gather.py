@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 def get_args():
     parser = argparse.ArgumentParser(description='Gather commits and issues from GitHub repositories')
-    parser.add_argument('-t', '--token', help='GitHub token path', type=str, default='token.json')
+    parser.add_argument('-t', '--token', help='GitHub token path', type=str, default='metadata.json')
     parser.add_argument('-r', '--repos', help='Path to the JSON file with the repositories', type=str, default='repos.json')
     parser.add_argument('-d', '--date', help='Path to the JSON file with the dates', type=str, default='dates.json')
     parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues-prs')
@@ -23,9 +23,7 @@ def main():
 
     coauthor_pattern = re.compile(r'Co-authored-by: (.*) <.*>')
 
-    # not_before_date = {'year': 2024, 'month': 9, 'day': 23, 'hour': 0, 'minute': 0, 'second': 0}
-    # not_before_date = {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0}
-    not_before_date = {'year': 2024, 'month': 11, 'day': 30, 'hour': 0, 'minute': 0, 'second': 0}
+    not_before_date = {'year': 2025, 'month': 1, 'day': 10, 'hour': 0, 'minute': 0, 'second': 0}
     not_before_d = {
         'year': f'{not_before_date["year"]:04d}',
         'month': f'{not_before_date["month"]:02d}',
@@ -36,9 +34,7 @@ def main():
     }
     not_before_date = datetime.fromisoformat('%s-%s-%sT%s:%s:%s+03:00' % (not_before_d['year'], not_before_d['month'], not_before_d['day'], not_before_d['hour'], not_before_d['minute'], not_before_d['second']))
     ms_dates = [
-        # {'year': 2024, 'month': 10, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0},
-        # {'year': 2024, 'month': 11, 'day': 30, 'hour': 0, 'minute': 0, 'second': 0},
-        {'year': 2024, 'month': 12, 'day': 21, 'hour': 0, 'minute': 0, 'second': 0}
+        {'year': 2025, 'month': 4, 'day': 26, 'hour': 0, 'minute': 0, 'second': 0}
     ]
     gmt_str = '+03:00'
     for i, date in enumerate(ms_dates):
