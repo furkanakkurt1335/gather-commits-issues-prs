@@ -11,6 +11,7 @@ def get_args():
     parser.add_argument('-o', '--output', help='Path to the output directory', type=str, default='commits-issues-prs')
     parser.add_argument('-b', '--branch', help='Branch to gather data from', type=str)
     parser.add_argument('-s', '--since', help='Only gather data since this date (YYYY-MM-DD)', type=str)
+    parser.add_argument('-u', '--usernames', help='Path to the JSON file mapping GitHub usernames to full names', type=str, default='github-usernames.json')
     parser.add_argument('-v', '--verbose', help='Verbose output', action='store_true')
     return parser.parse_args()
 
@@ -94,6 +95,10 @@ def load_date_config(dates_file=None, since_date=None):
     
     return not_before_d, formatted_ms_dates
 
+def get_full_name(username, username_mappings):
+    """Get full name from GitHub username if available"""
+    return username_mappings.get(username, username)
+
 def setup_github_auth(_):
     """Setup GitHub authentication headers"""
     headers = {'Accept': 'application/vnd.github.v3+json'}
@@ -125,7 +130,7 @@ def setup_github_auth(_):
     
     return headers
 
-def process_repos(repo_list, headers, args, not_before_d, ms_dates_formatted):
+def process_repos(repo_list, headers, args, not_before_d, ms_dates_formatted, username_mappings={}):
     """Process each repository to gather commits, issues, and PRs"""
     data_path = Path(args.output)
     data_path.mkdir(exist_ok=True)
@@ -162,17 +167,17 @@ def process_repos(repo_list, headers, args, not_before_d, ms_dates_formatted):
         
         # Gather commits
         gather_commits(user_t, repo_t, headers, args, repo_path, not_before_date, ms_dates, ms_l, 
-                      coauthor_pattern, prev_diffs)
+                      coauthor_pattern, prev_diffs, username_mappings)
         
         # Gather issues and PRs
-        gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, ms_dates, ms_l, prev_diffs)
+        gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, ms_dates, ms_l, prev_diffs, username_mappings)
         
         # Sort and finalize data
         finalize_repo_data(ms_l, ms_dates, repo_path)
         print(f'✓ Finished gathering all data for {repo_tuple}')
 
 def gather_commits(user_t, repo_t, headers, args, repo_path, not_before_date, ms_dates, ms_l, 
-                  coauthor_pattern, prev_diffs):
+                  coauthor_pattern, prev_diffs, username_mappings={}):
     """Gather commits for a repository"""
     print(f'  Gathering commits for {user_t}/{repo_t}...')
     page_n = 1
@@ -243,8 +248,15 @@ def gather_commits(user_t, repo_t, headers, args, repo_path, not_before_date, ms
                     for i, ms_date in enumerate(ms_dates):
                         if date_t < ms_date:
                             for author_name in coauthors + [author_t]:
+                                # Try to get the full name from mappings
+                                full_name = get_full_name(author_name, username_mappings)
+                                
                                 if author_name not in ms_l[i]['commits']:
-                                    ms_l[i]['commits'][author_name] = {'count': 0, 'list': []}
+                                    ms_l[i]['commits'][author_name] = {
+                                        'count': 0, 
+                                        'list': [],
+                                        'full_name': full_name
+                                    }
                                 ms_l[i]['commits'][author_name]['list'].append({
                                     'message': message_t, 
                                     'date': date_str, 
@@ -266,7 +278,7 @@ def gather_commits(user_t, repo_t, headers, args, repo_path, not_before_date, ms
             
             page_n += 1
 
-def gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, ms_dates, ms_l, prev_diffs):
+def gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, ms_dates, ms_l, prev_diffs, username_mappings={}):
     """Gather issues and PRs for a repository"""
     print(f'  Gathering issues and PRs for {user_t}/{repo_t}...')
     page_n = 1
@@ -314,8 +326,15 @@ def gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, m
                             comments_req = requests.get(comments_url, headers=headers)
                             comments_req.raise_for_status()
                             comments_res = comments_req.json()
-                            comments = [{'author': comment['user']['login'], 'body': comment.get('body', '')} 
-                                       for comment in comments_res]
+                            comments = []
+                            for comment in comments_res:
+                                comment_author = comment['user']['login']
+                                comment_author_full_name = get_full_name(comment_author, username_mappings)
+                                comments.append({
+                                    'author': comment_author, 
+                                    'author_full_name': comment_author_full_name,
+                                    'body': comment.get('body', '')
+                                })
                         except requests.exceptions.RequestException as e:
                             print(f"Error fetching comments: {e}")
                     
@@ -350,8 +369,20 @@ def gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, m
                     # Add issue/PR to milestone lists
                     for i, ms_date in enumerate(ms_dates):
                         if date_t < ms_date:
+                            # Try to get the full name from mappings
+                            full_name = get_full_name(author_t, username_mappings)
+                            
                             if author_t not in ms_l[i][key_t]:
-                                ms_l[i][key_t][author_t] = {'count': 0, 'list': []}
+                                ms_l[i][key_t][author_t] = {
+                                    'count': 0, 
+                                    'list': [],
+                                    'full_name': full_name
+                                }
+                            
+                            # Also map assignees to full names if possible
+                            assignee_full_names = []
+                            for assignee in assignee_l:
+                                assignee_full_names.append(get_full_name(assignee, username_mappings))
                             
                             d = {
                                 'title': title_t,
@@ -359,6 +390,7 @@ def gather_issues_and_prs(user_t, repo_t, headers, repo_path, not_before_date, m
                                 'date': date_str,
                                 'labels': label_l,
                                 'assignees': assignee_l,
+                                'assignee_full_names': assignee_full_names,
                                 'link': html_url,
                                 'state': issue['state'],
                                 'comments': comments
@@ -427,8 +459,31 @@ def main():
         print(f'No repositories found in {args.repos}. Please add repositories in the format: ["username/repo"]')
         return
     
+    # Load GitHub username to full name mappings if available
+    username_mappings = {}
+    username_path = Path(args.usernames)
+    if username_path.exists():
+        try:
+            with username_path.open('r', encoding='utf-8') as f:
+                username_mappings = json.load(f)
+            print(f"Loaded {len(username_mappings)} username mappings from {args.usernames}")
+        except Exception as e:
+            print(f"Error loading username mappings: {e}")
+    else:
+        print(f"Username mapping file {args.usernames} not found. Using GitHub usernames as is.")
+        # Create an example username mapping structure to help users
+        example_path = Path("github-usernames.example.json")
+        if not example_path.exists():
+            example = {
+                "github-username": "Full Name",
+                "another-username": "Another Person"
+            }
+            with example_path.open('w', encoding='utf-8') as f:
+                json.dump(example, f, ensure_ascii=False, indent=4)
+            print(f"Created example mapping file at {example_path} for reference")
+    
     # Process repositories
-    process_repos(repo_list, headers, args, not_before_d, ms_dates_formatted)
+    process_repos(repo_list, headers, args, not_before_d, ms_dates_formatted, username_mappings)
     
     print("Data gathering complete!")
 

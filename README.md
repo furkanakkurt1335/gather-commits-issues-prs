@@ -59,6 +59,7 @@ Options:
 - `-o, --output`: Directory for output data (default: `commits-issues-prs`)
 - `-b, --branch`: Branch to analyze (default: main/default branch)
 - `-s, --since`: Only gather data since this date in YYYY-MM-DD format
+- `-u, --usernames`: Path to JSON file mapping GitHub usernames to full names (default: `github-usernames.json`)
 
 ### GitHub Authentication
 
@@ -76,6 +77,41 @@ For private repositories, you'll need a GitHub token stored in a `.env` file:
 
 The `.env` file is included in `.gitignore` to prevent accidentally committing your token.
 
+### GitHub Username Mapping
+
+To map GitHub usernames to full names, the tool supports CSV data import:
+
+1. Use the included `csv_to_usernames_json.py` script to convert CSV data to JSON:
+
+   ```bash
+   python csv_to_usernames_json.py path/to/student_data.csv -o github-usernames.json
+   ```
+
+2. The CSV should have columns for `First name`, `Last name`, and `GitHub username`
+3. This creates a JSON file mapping GitHub usernames to full names
+4. `gather.py` will use this mapping to include full names alongside GitHub usernames in the output data
+
+The resulting JSON structure looks like this:
+
+```json
+{
+    "github-username": "Full Name", 
+    "another-username": "Another Person"
+}
+```
+
+For convenience, a simple script is provided that converts CSV data and gathers repository data:
+
+```bash
+# Convert CSV to username mappings and gather data
+./run_with_usernames.sh path/to/student_data.csv
+```
+
+This script will:
+
+1. Convert the CSV data to GitHub username mappings
+2. Use those mappings when gathering repository data
+
 #### Creating a GitHub Token
 
 1. Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
@@ -87,20 +123,6 @@ The `.env` file is included in `.gitignore` to prevent accidentally committing y
 5. Click "Generate token" and copy the token immediately
 6. Add this token to your `.env` file as shown above
 
-### 3. Generate Summaries
-
-Generate Markdown summaries for contributors:
-
-```bash
-python present.py -g [GROUP_NUMBER] -y [YEAR] -o [OUTPUT_DIRECTORY] -u [USERNAMES_FILE]
-```
-
-Required parameters:
-- `-g, --group`: Group number
-- `-y, --year`: Year of the course/project
-- `-o, --output-directory`: Directory to save the summary files
-- `-u, --usernames`: Path to JSON file mapping GitHub usernames to full names
-
 ## Examples
 
 ### Gathering data for a specific repository
@@ -109,19 +131,21 @@ Required parameters:
 python gather.py -r custom-repos.json -o output-data
 ```
 
-### Generating summaries for a group
+### Gathering data with username mappings
 
 ```bash
-python present.py -g 1 -y 2025 -o ./summaries -u github-usernames.json
+python gather.py -r repos.json -u github-usernames.json
 ```
 
 ## Output Format
 
 The gathered data is saved as JSON files with the following structure:
 
-- Commits: author, message, date, link, and statistics (files changed, lines modified)
-- Issues: author, title, description, labels, assignees, comments, and state
+- Commits: author (with full name if available), message, date, link, and statistics (files changed, lines modified)
+- Issues: author (with full name if available), title, description, labels, assignees, comments, and state
 - Pull Requests: same as issues plus commit information
+
+When GitHub username mappings are provided, the output includes both the GitHub username and the full name for each contributor, making the data more readable and easier to identify contributors.
 
 ## License
 
