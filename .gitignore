@@ -4,5 +4,6 @@ __pycache__/
 .hidden/
 .venv/
 *.json
+*.log
 commits-issues-prs/
 summaries/
